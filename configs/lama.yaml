@@ -1,0 +1,171 @@
+model:
+  base_learning_rate: 1.0e-5
+  target: gi.models.inpainting.lama_guided.DefaultInpaintingTrainingModule
+  params:
+    monitor: val_evaluator_stitched_state_two_fid_total_mean
+    visualize_attn: False
+    visualize_each_iters: 1000
+    concat_mask: true
+    store_discr_outputs_for_vis: true
+    use_ddp: True
+
+    flow_cfg:
+      target: gi.modules.warp.raft.Identity
+      params:
+        return_err: True
+
+    validation_keys:
+      - two
+      - four
+
+    scheduler_config:
+      target: gi.lr_scheduler.LambdaWarmUpCosineScheduler
+      params:
+        verbosity_interval: 0   # 0 or negative to disable
+        warm_up_steps: 1000
+        max_decay_steps: 1000000
+        lr_start: 1.0e-4
+        lr_max: 1.0
+        lr_min: 1.0e-4
+
+    config:
+      training_model:
+        kind: default
+        visualize_each_iters: 1000
+        concat_mask: true
+        store_discr_outputs_for_vis: true
+      losses:
+        l1:
+          weight_missing: 0
+          weight_known: 10
+        perceptual:
+          weight: 0
+        adversarial:
+          kind: r1
+          weight: 10
+          gp_coef: 0.001
+          mask_as_fake_target: true
+          allow_scale_mask: true
+        feature_matching:
+          weight: 100
+        resnet_pl:
+          weight: 30
+          weights_path: checkpoints/lama/
+      optimizers:
+        generator:
+          kind: adam
+          lr_factor: 1.0
+        discriminator:
+          kind: adam
+          lr_factor: 0.1
+      visualizer:
+        key_order:
+        - image
+        - predicted_image
+        - discr_output_fake
+        - discr_output_real
+        - inpainted
+        rescale_keys:
+        - discr_output_fake
+        - discr_output_real
+        kind: directory
+        outdir: ./visualizer-output/lama-fourier/samples
+        
+      generator:
+        kind: gi.modules.gi.lama_guided_ffc.FFCResNetGenerator
+        is_deformable: True
+        n_cross: 2
+        input_nc: 4
+        output_nc: 3
+        ngf: 64
+        n_downsampling: 3
+        n_blocks: 6
+        add_out_act: sigmoid
+        init_conv_kwargs:
+          ratio_gin: 0
+          ratio_gout: 0
+          enable_lfu: false
+        downsample_conv_kwargs:
+          ratio_gin: ${model.params.config.generator.init_conv_kwargs.ratio_gout}
+          ratio_gout: ${model.params.config.generator.downsample_conv_kwargs.ratio_gin}
+          enable_lfu: false
+        resnet_conv_kwargs:
+          ratio_gin: 0.75
+          ratio_gout: ${model.params.config.generator.resnet_conv_kwargs.ratio_gin}
+          enable_lfu: false
+      discriminator:
+        kind: pix2pixhd_nlayer
+        input_nc: 3
+        ndf: 64
+        n_layers: 4
+      location:
+        data_root_dir: /data/data
+        out_root_dir: /data/experiments
+        tb_dir: /data/tb_logs
+        pretrained_models: /some_path
+
+      evaluator:
+        kind: default
+        inpainted_key: inpainted  # if you want to evaluate before blending with original image by mask, set predicted_image
+        integral_kind: ssim_fid100_f1
+
+
+data:
+  target: gi.main.DataModuleFromConfig
+  params:
+    batch_size: 8
+    num_workers: 4
+    train:
+      target: gi.data.inpainting_lama_multiframe.LamaGI
+      params:
+          easy: False
+          n_references: 2
+          root: data
+          filelist: data/places365standard_train.txt
+          out_size: 256
+          mask_gen_kwargs:  # probabilities do not need to sum to 1, they are re-normalized in mask generator
+            irregular_proba: 1
+            irregular_kwargs:
+              max_angle: 4
+              max_len: 200
+              max_width: 100
+              max_times: 5
+              min_times: 1
+
+            box_proba: 1
+            box_kwargs:
+              margin: 10
+              bbox_min_size: 30
+              bbox_max_size: 150
+              max_times: 4
+              min_times: 1
+
+            segm_proba: 0
+
+          transform_variant: distortions
+
+    combined_val_batches: False
+    validation:
+      0_two:
+        target: gi.data.inpainting_lama_multiframe.LamaGIValidation
+        params:
+            filenames: data/places365lama_val_guided.txt
+            n_references: 2
+      1_four:
+        target: gi.data.inpainting_lama_multiframe.LamaGIValidation
+        params:
+            filenames: data/places365lama_val_guided.txt
+            n_references: 4
+
+    test:
+      target: gi.data.inpainting_lama_multiframe.LamaGIValidation
+      params:
+          filenames: data/places365lama_val_guided.txt
+          n_references: 4
+
+
+lightning:
+  trainer:
+    benchmark: True
+    num_sanity_val_steps: 0
+    accumulate_grad_batches: 2
