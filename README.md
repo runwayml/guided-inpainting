@@ -7,6 +7,10 @@ Many video editing tasks such as rotoscoping or object removal require the propa
 ***Towards Unified Keyframe Propagation Models***<br/>
 Patrick Esser, Peter Michael, Soumyadip Sengupta
 
+
+https://user-images.githubusercontent.com/2175508/169424205-be1ec110-be98-44a6-8ef7-0b8f4205435b.mp4
+
+
 [Video results for all DAVIS sequences](https://k00.fr/atvnnaws).
 
 ## Requirements
